@@ -46,13 +46,16 @@
 #include <LiquidCrystal_I2C.h>
 #include <Stepper.h>
 #include <RTClib.h>
+// Physical DS3231 is primary time source again (NTP-only proved unreliable
+// on this network). NTP is now used as an opportunistic correction on top
+// of the RTC when available, see the NTP retry block in loop() below.
 #include <EEPROM.h>
 
 // ============================================================================
 // --- Wi-Fi / Firebase Configuration ---
 // ============================================================================
-const char* WIFI_SSID     = "Alex";
-const char* WIFI_PASSWORD = "Angelic2020";
+const char* WIFI_SSID     = "Galaxy";
+const char* WIFI_PASSWORD = "zpub1832";
 
 const char* FIREBASE_PROJECT_ID = "smartfishfeeder-25c86";
 const char* DEVICE_ID           = "feeder_01";
@@ -90,8 +93,8 @@ RTC_DS3231 rtc;
 // --- System State & Constants ---
 // ============================================================================
 const unsigned long FEED_COOLDOWN_MS = 30000UL;
-const float HOPPER_EMPTY_DIST_CM = 20.0;
-const float HOPPER_FULL_DIST_CM = 2.0;
+const float HOPPER_EMPTY_DIST_CM = 11.0;
+const float HOPPER_FULL_DIST_CM = 5.0;
 
 int stepperSpeedSetting = 5;
 unsigned long lastFeedTime = 0;
@@ -104,7 +107,8 @@ bool hasFaultCondition = false;
 String faultReason = "";
 int lastCheckedDay = -1;
 
-bool rtcWorking = false;
+bool rtcWorking = false; // true only if the physical DS3231 responded on the MOST RECENT check
+bool ntpSynced = false;  // true once NTP has succeeded at least once this session, used as fallback when RTC is intermittent
 bool lcdWorking = false;
 bool sensorWorking = false;
 String lastButtonPressedTime = "never";
@@ -113,11 +117,13 @@ String lastButtonPressedTime = "never";
 unsigned long lastTelemetryUpdate = 0;
 const unsigned long TELEMETRY_INTERVAL = 10000;
 unsigned long lastCommandCheck = 0;
-const unsigned long COMMAND_CHECK_INTERVAL = 3000;
+const unsigned long COMMAND_CHECK_INTERVAL = 5000;
 unsigned long lastScheduleCheck = 0;
-const unsigned long SCHEDULE_CHECK_INTERVAL = 15000;
+const unsigned long SCHEDULE_CHECK_INTERVAL = 60000;
 unsigned long lastWifiCheck = 0;
 const unsigned long WIFI_CHECK_INTERVAL = 10000;
+unsigned long lastNtpCheck = 0;
+const unsigned long NTP_CHECK_INTERVAL = 300000; // 5 minutes, periodic RTC drift correction
 unsigned long lastLcdUpdate = 0;
 String lastSchedulesRaw = "";
 
@@ -157,6 +163,7 @@ void initAndLoadEEPROM();
 bool addSchedule(int hour, int minute, int portion, int daysMask);
 bool toggleSchedule(int index, bool enabled);
 String getFormattedTime();
+bool getCurrentTime(struct tm &out);
 String getIsoTimestamp();
 
 // ============================================================================
@@ -188,7 +195,7 @@ void setup() {
   lcd.backlight();
   lcdWorking = true;
   lcd.setCursor(0, 0);
-  lcd.print(F("AquaPulse feed"));
+  lcd.print(F("AquaPulse v3.2"));
   lcd.setCursor(0, 1);
   lcd.print(F("Initializing..."));
 
@@ -197,6 +204,7 @@ void setup() {
     Serial.println(F("RTC Initialized successfully."));
     if (rtc.lostPower()) {
       rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+      Serial.println(F("RTC lost power, set from compile time (will correct from NTP once WiFi connects)."));
     }
   } else {
     rtcWorking = false;
@@ -224,7 +232,35 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print(F("WiFi Connected! IP: "));
     Serial.println(WiFi.localIP());
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+    // Kampala/Uganda is UTC+3, no daylight saving. Adjust GMT_OFFSET_SEC
+    // if you're ever in a different timezone.
+    const long GMT_OFFSET_SEC = 3 * 3600;
+    configTime(GMT_OFFSET_SEC, 0, "pool.ntp.org", "time.nist.gov");
+
+    // Wait for NTP to actually resolve before trusting the time. Without
+    // this, the first telemetry push can go out with a garbage/epoch
+    // timestamp if configTime()'s async sync hasn't finished yet.
+    time_t nowTime = time(nullptr);
+    unsigned long ntpStart = millis();
+    while (nowTime < 100000 && millis() - ntpStart < 8000) {
+      delay(200);
+      nowTime = time(nullptr);
+    }
+    if (nowTime < 100000) {
+      Serial.println(F("NTP sync did not complete in time, timestamps may be off until it catches up."));
+    } else {
+      Serial.println(F("NTP time synced, correcting RTC."));
+      ntpSynced = true;
+      if (rtcWorking) {
+        struct tm timeinfo;
+        localtime_r(&nowTime, &timeinfo); // applies the GMT_OFFSET_SEC set via configTime
+        rtc.adjust(DateTime(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec));
+        Serial.println(F("RTC corrected from NTP."));
+      }
+    }
+
     if (lcdWorking) {
       lcd.setCursor(0, 1);
       lcd.print(F("WiFi Connected "));
@@ -273,6 +309,27 @@ void loop() {
     }
   }
 
+  // Periodic RTC correction "kick": every few minutes, if WiFi and NTP are
+  // available, nudge the physical RTC back in line with real time. This
+  // catches drift over a long-running session without requiring NTP at
+  // all for normal operation, the RTC alone is enough to keep working.
+  if (WiFi.status() == WL_CONNECTED) {
+    if (currentMillis - lastNtpCheck >= NTP_CHECK_INTERVAL) {
+      lastNtpCheck = currentMillis;
+      time_t nowTime = time(nullptr);
+      if (nowTime >= 100000) {
+        ntpSynced = true; // keep this fresh regardless of whether the RTC happens to be up right now
+        if (rtcWorking) {
+          struct tm timeinfo;
+          localtime_r(&nowTime, &timeinfo);
+          rtc.adjust(DateTime(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                               timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec));
+          Serial.println(F("RTC periodic correction from NTP applied."));
+        }
+      }
+    }
+  }
+
   // Network tasks run only when connected
   if (WiFi.status() == WL_CONNECTED) {
     if (currentMillis - lastCommandCheck >= COMMAND_CHECK_INTERVAL) {
@@ -311,12 +368,16 @@ void dispenseFood(int portions, String source) {
     lcd.setCursor(0, 0);
     lcd.print(F("Dispensing Food"));
   }
+  
+  tone(BUZZER_PIN, 2000); // starts continuous beep, no duration = plays until noTone() stops it
 
   for (int p = 0; p < portions; p++) {
     feedStepper.step(STEPS_PER_REV);
     delay(100);
   }
-
+  
+  noTone(BUZZER_PIN); // stop the continuous beep once dispensing is done
+  
   stepperCoilsOff();
   tone(BUZZER_PIN, 2500, 150);
 
@@ -344,6 +405,17 @@ void dispenseFood(int portions, String source) {
  * "ignore repeats for 300ms" lockout, which can miss short/bouncy presses
  * entirely if the contact is flaky (worth checking the wiring too, but
  * this makes the code itself as forgiving as reasonably possible).
+ */
+/**
+ * Polling-based edge-triggered debounce. Reverted from an interrupt-based
+ * approach after the interrupt turned out to be too sensitive to electrical
+ * noise from the stepper motor, a motor coil switching can induce a false
+ * edge on a nearby signal line, which a raw interrupt can't distinguish
+ * from a real press. Polling with a debounce window is slower to react
+ * during a blocking network call, but far more resistant to that kind of
+ * false triggering. Network timeouts were shortened instead (see
+ * HTTPClient .setTimeout() calls) to reduce how long the button check can
+ * be delayed by a blocking call.
  */
 void checkManualButton() {
   static int lastRawReading = HIGH;
@@ -391,15 +463,34 @@ void updateTelemetry() {
     float distanceCm = (duration * 0.0343) / 2.0;
     float rawPercent = ((HOPPER_EMPTY_DIST_CM - distanceCm) / (HOPPER_EMPTY_DIST_CM - HOPPER_FULL_DIST_CM)) * 100.0;
     currentCapacity = constrain(round(rawPercent), 0, 100);
+
+    // CALIBRATION AID: prints the raw measured distance once every 2
+    // seconds. Use this to find your actual HOPPER_FULL_DIST_CM and
+    // HOPPER_EMPTY_DIST_CM values, see the calibration steps in the docs.
+    // Safe to leave in permanently, it's cheap and useful for future
+    // troubleshooting too.
+    static unsigned long lastDistancePrint = 0;
+    if (millis() - lastDistancePrint >= 2000) {
+      lastDistancePrint = millis();
+      Serial.print(F("Raw distance: "));
+      Serial.print(distanceCm);
+      Serial.print(F(" cm, capacity: "));
+      Serial.print(currentCapacity);
+      Serial.println(F("%"));
+    }
   }
 
   // Fault flags are informational only in this build - nothing here blocks
   // dispensing (see checkManualButton() and checkFirestoreCommands()), they
   // only drive the LCD/LED/buzzer alert and what gets reported to Firestore.
+  // RTC FAIL only fires when NEITHER the physical RTC NOR the NTP fallback
+  // is available, an intermittent RTC alone is covered silently by NTP
+  // (see getCurrentTime()), so it doesn't false-alarm every time the
+  // corroded pins have one of their "off" moments.
   if (!sensorWorking) {
     hasFaultCondition = true;
     faultReason = "SENSOR FAIL";
-  } else if (!rtcWorking) {
+  } else if (!rtcWorking && !ntpSynced) {
     hasFaultCondition = true;
     faultReason = "RTC FAIL";
   } else if (currentCapacity <= 10) {
@@ -416,10 +507,10 @@ void updateTelemetry() {
 }
 
 void checkScheduledFeedings() {
-  if (!rtcWorking) return;
-  DateTime now = rtc.now();
+  struct tm now;
+  if (!getCurrentTime(now)) return; // neither RTC nor NTP available right now
 
-  if (now.day() != lastCheckedDay) {
+  if (now.tm_mday != lastCheckedDay) {
     int schedCount = EEPROM.read(EEPROM_SCHED_COUNT_ADDR);
     for (int i = 0; i < schedCount; i++) {
       int addr = EEPROM_SCHED_START_ADDR + (i * sizeof(FeedingSchedule));
@@ -431,20 +522,20 @@ void checkScheduledFeedings() {
       }
     }
     EEPROM.commit();
-    lastCheckedDay = now.day();
+    lastCheckedDay = now.tm_mday;
   }
 
   int count = EEPROM.read(EEPROM_SCHED_COUNT_ADDR);
   if (count <= 0) return;
 
-  int dayOfWeek = now.dayOfTheWeek();
+  int dayOfWeek = now.tm_wday;
   for (int i = 0; i < count; i++) {
     int addr = EEPROM_SCHED_START_ADDR + (i * sizeof(FeedingSchedule));
     FeedingSchedule sched;
     EEPROM.get(addr, sched);
 
     if (sched.enabled && !sched.triggeredToday) {
-      if (sched.hour == now.hour() && sched.minute == now.minute()) {
+      if (sched.hour == now.tm_hour && sched.minute == now.tm_min) {
         if (sched.daysMask & (1 << dayOfWeek)) {
           dispenseFood(sched.portion, "scheduled");
           sched.triggeredToday = true;
@@ -479,19 +570,52 @@ void pushTelemetryToFirestore() {
   fields["capacity"]["integerValue"] = String(currentCapacity);
   fields["healthSummary"]["stringValue"] = hasFaultCondition ? ("Alert: " + faultReason) : "All systems operational.";
 
+  JsonObject health = fields["health"]["mapValue"]["fields"].to<JsonObject>();
+
+  JsonObject board = health["esp32Board"]["mapValue"]["fields"].to<JsonObject>();
+  board["responding"]["booleanValue"] = true;
+  board["uptime"]["integerValue"] = String(millis() / 1000);
+
+  JsonObject network = health["network"]["mapValue"]["fields"].to<JsonObject>();
+  network["wifiSignal"]["stringValue"] = WiFi.RSSI() > -60 ? "good" : (WiFi.RSSI() > -80 ? "weak" : "none");
+  network["networkStatus"]["stringValue"] = "connected";
+  network["ipAddress"]["stringValue"] = WiFi.localIP().toString();
+
+  JsonObject buttons = health["buttons"]["mapValue"]["fields"].to<JsonObject>();
+  buttons["lastPressed"]["stringValue"] = lastButtonPressedTime;
+  buttons["functional"]["booleanValue"] = true;
+
+  JsonObject lcdScreen = health["lcdScreen"]["mapValue"]["fields"].to<JsonObject>();
+  lcdScreen["working"]["booleanValue"] = lcdWorking;
+  lcdScreen["lastMessage"]["stringValue"] = hasFaultCondition ? ("ALERT: " + faultReason) : "SYSTEM: ACTIVE";
+
+  JsonObject ultrasonic = health["ultrasonicSensor"]["mapValue"]["fields"].to<JsonObject>();
+  ultrasonic["working"]["booleanValue"] = sensorWorking;
+  ultrasonic["lastMeasuredLevel"]["stringValue"] = currentCapacity <= 10 ? "Empty" : currentCapacity <= 30 ? "Low" : currentCapacity <= 75 ? "Medium" : "Full";
+
+  JsonObject rtcModule = health["rtcModule"]["mapValue"]["fields"].to<JsonObject>();
+  rtcModule["synced"]["booleanValue"] = rtcWorking;
+  rtcModule["deviceTime"]["stringValue"] = getFormattedTime().substring(0, 5);
+
+  JsonObject stepperHealth = health["stepperMotor"]["mapValue"]["fields"].to<JsonObject>();
+  stepperHealth["status"]["stringValue"] = isCooldownActive ? "idle" : (hasFaultCondition ? "error" : "idle");
+  stepperHealth["lastActuation"]["stringValue"] = lastButtonPressedTime;
+  stepperHealth["configuredSpeed"]["integerValue"] = String(stepperSpeedSetting);
+
   String payloadStr;
   serializeJson(payload, payloadStr);
 
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(4000);
+  http.setTimeout(2500);
 
   String url = firestoreDeviceUrl +
     "?updateMask.fieldPaths=connectivity"
     "&updateMask.fieldPaths=lastCommunication"
     "&updateMask.fieldPaths=capacity"
-    "&updateMask.fieldPaths=healthSummary";
+    "&updateMask.fieldPaths=healthSummary"
+    "&updateMask.fieldPaths=health";
 
   if (http.begin(client, url)) {
     http.addHeader("Content-Type", "application/json");
@@ -501,23 +625,38 @@ void pushTelemetryToFirestore() {
 }
 
 /**
- * Processes at most ONE pending command per call, the oldest one returned
- * by Firestore. This is the key fix: previously, if multiple pending
- * commands existed at once (e.g. a stray old "reboot" alongside a new
- * "feed"), all of them got processed in the same pass, so a leftover
- * reboot command could fire the instant a feed command was also present.
- * Processing one at a time, in order, and logging each one to Serial,
- * makes this fully visible and prevents that kind of cross-talk.
+ * Processes at most ONE pending command per call.
+ *
+ * IMPORTANT: this uses Firestore's runQuery endpoint with a filter for
+ * status == "pending", NOT a plain listDocuments GET on the whole
+ * collection. Firestore bills one read per document a query touches - a
+ * plain GET on the collection re-reads every "done" command that has ever
+ * accumulated, every single poll, forever. Filtering server-side means old
+ * done commands cost nothing, no matter how many pile up over time.
  */
 void checkFirestoreCommands() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(4000);
+  http.setTimeout(2500);
 
-  if (!http.begin(client, firestoreCommandsUrl)) return;
+  String runQueryUrl = firestoreDeviceUrl + ":runQuery";
 
-  int httpCode = http.GET();
+  JsonDocument queryBody;
+  JsonArray from = queryBody["structuredQuery"]["from"].to<JsonArray>();
+  from.add<JsonObject>()["collectionId"] = "commands";
+  JsonObject fieldFilter = queryBody["structuredQuery"]["where"]["fieldFilter"].to<JsonObject>();
+  fieldFilter["field"]["fieldPath"] = "status";
+  fieldFilter["op"] = "EQUAL";
+  fieldFilter["value"]["stringValue"] = "pending";
+  queryBody["structuredQuery"]["limit"] = 5;
+
+  String bodyStr;
+  serializeJson(queryBody, bodyStr);
+
+  if (!http.begin(client, runQueryUrl)) return;
+  http.addHeader("Content-Type", "application/json");
+  int httpCode = http.POST(bodyStr);
   if (httpCode != HTTP_CODE_OK) {
     http.end();
     return;
@@ -526,15 +665,16 @@ void checkFirestoreCommands() {
   String response = http.getString();
   http.end();
 
+  // runQuery returns a top-level JSON array, each entry either has a
+  // "document" key (a match) or is just a readTime heartbeat (no match).
   JsonDocument doc;
   if (deserializeJson(doc, response)) return;
+  JsonArray results = doc.as<JsonArray>();
 
-  JsonArray documents = doc["documents"].as<JsonArray>();
-
-  for (JsonObject document : documents) {
+  for (JsonObject result : results) {
+    if (!result["document"].is<JsonObject>()) continue;
+    JsonObject document = result["document"];
     JsonObject fields = document["fields"];
-    String status = fields["status"]["stringValue"] | "";
-    if (status != "pending") continue;
 
     String action = fields["action"]["stringValue"] | "";
     String docName = document["name"].as<String>();
@@ -584,7 +724,7 @@ bool markCommandDone(String docResourceName) {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(4000);
+  http.setTimeout(2500);
 
   bool success = false;
   if (http.begin(client, url)) {
@@ -600,7 +740,7 @@ void checkFirestoreSchedules() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(4000);
+  http.setTimeout(2500);
 
   if (!http.begin(client, firestoreSchedulesUrl)) return;
 
@@ -663,7 +803,7 @@ void uploadFeedHistoryItem(int qty, String source) {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(4000);
+  http.setTimeout(2500);
 
   if (http.begin(client, firestoreHistoryUrl)) {
     http.addHeader("Content-Type", "application/json");
@@ -721,11 +861,81 @@ bool toggleSchedule(int index, bool enabled) {
   return true;
 }
 
+/**
+ * Unified time source with fallback. Tries the physical RTC first (cheap
+ * re-check every call, since it's known to be intermittent), and falls
+ * back to the NTP-synced system clock if the RTC doesn't respond right
+ * now. Only returns false if NEITHER source is available, which is the
+ * only case that should actually count as a real time failure.
+ *
+ * This is what lets scheduling and app commands keep working even while
+ * the RTC's corroded pins are having one of their "off" moments, as long
+ * as NTP has synced at least once this session, that reading covers it.
+ */
+bool getCurrentTime(struct tm &out) {
+  // Lightweight presence check (not a full rtc.begin() re-init) - cheap
+  // enough to call on every read, since the RTC is known to be
+  // intermittent and we want the freshest possible answer each time.
+  Wire.beginTransmission(0x68); // DS3231 default I2C address
+  byte i2cError = Wire.endTransmission();
+
+  if (i2cError == 0) {
+    DateTime firstRead = rtc.now();
+    delay(5); // tiny gap between the two reads
+    DateTime secondRead = rtc.now();
+
+    // Double-read consistency check: a genuine reading will agree with
+    // itself (within a second, for the elapsed gap) on a second read
+    // moments later. A corrupted glitch from a marginal connection is
+    // extremely unlikely to reproduce the exact same wrong value twice,
+    // this catches subtle corruption that still LOOKS like a valid time
+    // (e.g. a wrong-but-in-range minute), which a plausibility range check
+    // alone can't detect.
+    long diffSeconds = abs((long)(secondRead.unixtime() - firstRead.unixtime()));
+    bool consistent = diffSeconds <= 1;
+
+    DateTime now = secondRead;
+
+    bool plausible =
+      now.year() >= 2024 && now.year() <= 2099 &&
+      now.month() >= 1 && now.month() <= 12 &&
+      now.day() >= 1 && now.day() <= 31 &&
+      now.hour() <= 23 &&
+      now.minute() <= 59 &&
+      now.second() <= 59;
+
+    if (plausible && consistent) {
+      rtcWorking = true;
+      out.tm_year = now.year() - 1900;
+      out.tm_mon = now.month() - 1;
+      out.tm_mday = now.day();
+      out.tm_hour = now.hour();
+      out.tm_min = now.minute();
+      out.tm_sec = now.second();
+      out.tm_wday = now.dayOfTheWeek();
+      return true;
+    }
+
+    Serial.println(F("RTC read looked corrupted (implausible or inconsistent between two reads), discarding and falling back."));
+  }
+  rtcWorking = false;
+
+  if (ntpSynced) {
+    time_t nowEpoch = time(nullptr);
+    if (nowEpoch >= 100000) {
+      localtime_r(&nowEpoch, &out);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 String getFormattedTime() {
-  if (!rtcWorking) return "--:--:--";
-  DateTime now = rtc.now();
+  struct tm now;
+  if (!getCurrentTime(now)) return "--:--:--";
   char buf[9];
-  snprintf(buf, sizeof(buf), "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+  snprintf(buf, sizeof(buf), "%02d:%02d:%02d", now.tm_hour, now.tm_min, now.tm_sec);
   return String(buf);
 }
 
@@ -733,7 +943,7 @@ void updateLcdDisplay() {
   if (!lcdWorking) return;
 
   lcd.setCursor(0, 0);
-  if (rtcWorking) {
+  if (rtcWorking || ntpSynced) {
     lcd.print(getFormattedTime().substring(0, 5));
   } else {
     lcd.print(F("NO RTC"));
