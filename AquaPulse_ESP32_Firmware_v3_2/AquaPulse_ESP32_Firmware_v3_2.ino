@@ -54,8 +54,8 @@
 // ============================================================================
 // --- Wi-Fi / Firebase Configuration ---
 // ============================================================================
-const char* WIFI_SSID     = "Galaxy";
-const char* WIFI_PASSWORD = "zpub1832";
+const char* WIFI_SSID     = "Iphone13pro";
+const char* WIFI_PASSWORD = "Buyyourowndata";
 
 const char* FIREBASE_PROJECT_ID = "smartfishfeeder-25c86";
 const char* DEVICE_ID           = "feeder_01";

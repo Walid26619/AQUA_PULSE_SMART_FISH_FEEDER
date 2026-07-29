@@ -1,14 +1,18 @@
 import { useState } from "react";
 import { sendFeedCommand, sendRebootCommand, sendSelftestCommand } from "../lib/commands";
+import { computePortionsPerFeeding, type FarmProfile } from "../lib/feedingCalculator";
 
 interface Props {
   onAction: (message: string) => void;
   disabled?: boolean;
+  farmProfile?: FarmProfile;
 }
 
-export function FeedControl({ onAction, disabled }: Props) {
-  const [portion, setPortion] = useState(1);
+export function FeedControl({ onAction, disabled, farmProfile }: Props) {
   const [sending, setSending] = useState(false);
+
+  const portion = farmProfile ? computePortionsPerFeeding(farmProfile) : 1;
+  const profileNotSet = !farmProfile || farmProfile.fishCount <= 0;
 
   async function handleFeed() {
     setSending(true);
@@ -41,18 +45,17 @@ export function FeedControl({ onAction, disabled }: Props) {
         </p>
       )}
 
-      <div className="field" style={{ marginBottom: 12 }}>
-        <label htmlFor="portion">Portions</label>
-        <input
-          id="portion"
-          type="number"
-          min={1}
-          max={5}
-          value={portion}
-          disabled={disabled}
-          onChange={(e) => setPortion(Math.min(5, Math.max(1, Number(e.target.value))))}
-        />
-      </div>
+      {profileNotSet && (
+        <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 12 }}>
+          Set up your farm profile below for an automatically calculated
+          amount. Using a default of 1 portion until then.
+        </p>
+      )}
+
+      <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 12 }}>
+        Feed now will dispense <strong>{portion} portion{portion > 1 ? "s" : ""}</strong>, based on your farm profile.
+      </p>
+
       <div className="button-row">
         <button className="btn sage" onClick={handleFeed} disabled={sending || disabled}>
           {sending ? "Sending..." : "Feed now"}

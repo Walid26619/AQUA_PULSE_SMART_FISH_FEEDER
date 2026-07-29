@@ -1,13 +1,19 @@
 import { useState } from "react";
 import { useSchedules } from "../hooks/useSchedules";
 import { DAY_ORDER } from "../types";
+import { computePortionsPerFeeding, type FarmProfile } from "../lib/feedingCalculator";
 
-export function ScheduleManager() {
+interface Props {
+  farmProfile?: FarmProfile;
+}
+
+export function ScheduleManager({ farmProfile }: Props) {
   const { schedules, loading, addSchedule, toggleSchedule, removeSchedule } = useSchedules();
   const [time, setTime] = useState("08:00");
-  const [portion, setPortion] = useState(1);
   const [days, setDays] = useState<string[]>(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
   const [saving, setSaving] = useState(false);
+
+  const portion = farmProfile ? computePortionsPerFeeding(farmProfile) : 1;
 
   function toggleDay(day: string) {
     setDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]));
@@ -19,7 +25,6 @@ export function ScheduleManager() {
     try {
       await addSchedule(time, portion, days);
       setTime("08:00");
-      setPortion(1);
     } finally {
       setSaving(false);
     }
@@ -31,21 +36,14 @@ export function ScheduleManager() {
     <div className="panel">
       <h2>Feeding schedule</h2>
 
+      <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 12 }}>
+        Each scheduled feeding dispenses <strong>{portion} portion{portion > 1 ? "s" : ""}</strong>, calculated from your farm profile below.
+      </p>
+
       <div className="schedule-form">
         <div className="field">
           <label htmlFor="sched-time">Time</label>
           <input id="sched-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="sched-portion">Portions</label>
-          <input
-            id="sched-portion"
-            type="number"
-            min={1}
-            max={5}
-            value={portion}
-            onChange={(e) => setPortion(Math.min(5, Math.max(1, Number(e.target.value))))}
-          />
         </div>
         <div className="field">
           <label>Days</label>

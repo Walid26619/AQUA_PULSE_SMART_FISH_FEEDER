@@ -5,6 +5,8 @@ import { HealthGrid } from "./components/HealthGrid";
 import { FeedControl } from "./components/FeedControl";
 import { ScheduleManager } from "./components/ScheduleManager";
 import { HistoryLog } from "./components/HistoryLog";
+import { FarmProfile } from "./components/FarmProfile";
+import { DEFAULT_FARM_PROFILE } from "./lib/feedingCalculator";
 
 export default function App() {
   const { device, loading, error } = useDevice();
@@ -22,6 +24,15 @@ export default function App() {
   }
 
   const isOnline = device ? computeIsOnline(device, now) : false;
+
+  const farmProfile = device?.farmProfile
+    ? {
+        species: device.farmProfile.species ?? DEFAULT_FARM_PROFILE.species,
+        fishCount: device.farmProfile.fishCount ?? DEFAULT_FARM_PROFILE.fishCount,
+        feedingsPerDay: device.farmProfile.feedingsPerDay ?? DEFAULT_FARM_PROFILE.feedingsPerDay,
+        gramsPerPortion: device.farmProfile.gramsPerPortion ?? DEFAULT_FARM_PROFILE.gramsPerPortion,
+      }
+    : DEFAULT_FARM_PROFILE;
 
   return (
     <div className="app-shell">
@@ -49,8 +60,9 @@ export default function App() {
       {device && (
         <>
           <StatusPanel device={device} />
-          <FeedControl onAction={showToast} disabled={!isOnline} />
-          <ScheduleManager />
+          <FeedControl onAction={showToast} disabled={!isOnline} farmProfile={farmProfile} />
+          <FarmProfile device={device} />
+          <ScheduleManager farmProfile={farmProfile} />
           <HealthGrid device={device} />
           <HistoryLog />
         </>
