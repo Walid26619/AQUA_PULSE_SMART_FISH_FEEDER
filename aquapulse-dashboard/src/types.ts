@@ -18,7 +18,7 @@ export interface DeviceDoc {
     buttons?: { lastPressed?: string; functional?: boolean };
     lcdScreen?: { working?: boolean; lastMessage?: string };
     ultrasonicSensor?: { working?: boolean; rawDistanceCm?: number; lastMeasuredLevel?: string };
-    timeSync?: { synced?: boolean; deviceTime?: string };
+    rtcModule?: { synced?: boolean; deviceTime?: string };
     stepperMotor?: { status?: string; lastActuation?: string; configuredSpeed?: number };
   };
   farmProfile?: {
