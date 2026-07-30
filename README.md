@@ -111,6 +111,10 @@ Location: `/dashboard`
 React + TypeScript + Vite, talking directly to Firestore client-side, no
 separate backend server.
 
+### Web App Preview
+
+[View AquaPulse Web App Screenshot (PDF)](assets/readme_images/web_app_screenshot.pdf)
+
 ### Dashboard setup
 
 ```
