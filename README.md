@@ -78,13 +78,6 @@ guide for details on how this was diagnosed and fixed during development.
 
 ![Side Cutaway Diagram showing hopper, dispensing mechanism, and electronics bay](assets/readme_images/image_7.jpg)
 
-### Rear Elevation — Enclosure Design
-
-![Rear Elevation Orthographic Drawing (Scale 1:1)](assets/readme_images/image_4.jpg)
-
-### Circuit Wiring Schematic
-
-![Circuit Wiring Schematic — ESP32, Arduino Uno, DS3231 RTC, Servo Motor, Breadboard (1:1)](assets/readme_images/image_2.jpg)
 
 ## Firmware
 
@@ -117,14 +110,6 @@ Location: `/dashboard`
 
 React + TypeScript + Vite, talking directly to Firestore client-side, no
 separate backend server.
-
-### Web Dashboard Screens
-
-![Web Dashboard — Device Health, Refill Prediction, Cooldown Lock, Sync Status, Onboarding, QR Pairing, Export Log, Multi-Pond Overview](assets/readme_images/image_6.jpg)
-
-### Mobile App Screens
-
-![Mobile App — Login, Calibration, Offline Mode, Scheduling, Alerts, Analytics, Notifications, Profile](assets/readme_images/image_3.jpg)
 
 ### Dashboard setup
 
