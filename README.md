@@ -4,6 +4,18 @@ An automatic fish feeder built around an ESP32, controllable from a web
 dashboard, with scheduled and manual feeding, live hopper level monitoring,
 and remote status reporting over Firebase.
 
+## Team Members
+
+Department of Computer Science, Makerere University — Group 21
+
+| Name | Student No. | Reg. No. |
+|------|-------------|----------|
+| MUTSINZI ALEX | 25/U/03480PS | 2500703480 |
+| KAHUMA WALID | 25/U/26619 | 2500726619 |
+| MUGABI ROBINSON | 25/U/03456/EVE | 2500703456 |
+| NANFUUKA BONITAH | 25/U/03527/PS | 2500703527 |
+| OKUJA EMMANUEL DILA JOHN | 25/U/28777/PSA | 2500728777 |
+
 ## Overview
 
 A single ESP32 board runs the entire feeder: it drives a stepper motor to
@@ -54,6 +66,26 @@ supply source with adequate separation from the ESP32's own power path, a
 shared, marginal rail can brown out the ESP32 mid-dispense. See the wiring
 guide for details on how this was diagnosed and fixed during development.
 
+## Project Design
+
+### 3D Rendered View
+
+![3D Rendered View — AquaPulse Smart Fish Feeder](assets/readme_images/image_5.jpg)
+
+![3D Front Illustration](assets/readme_images/image_1.jpg)
+
+### Side Cutaway — Internal Components
+
+![Side Cutaway Diagram showing hopper, dispensing mechanism, and electronics bay](assets/readme_images/image_7.jpg)
+
+### Rear Elevation — Enclosure Design
+
+![Rear Elevation Orthographic Drawing (Scale 1:1)](assets/readme_images/image_4.jpg)
+
+### Circuit Wiring Schematic
+
+![Circuit Wiring Schematic — ESP32, Arduino Uno, DS3231 RTC, Servo Motor, Breadboard (1:1)](assets/readme_images/image_2.jpg)
+
 ## Firmware
 
 Location: `/firmware/AquaPulse_ESP32_Firmware.ino`
@@ -85,6 +117,14 @@ Location: `/dashboard`
 
 React + TypeScript + Vite, talking directly to Firestore client-side, no
 separate backend server.
+
+### Web Dashboard Screens
+
+![Web Dashboard — Device Health, Refill Prediction, Cooldown Lock, Sync Status, Onboarding, QR Pairing, Export Log, Multi-Pond Overview](assets/readme_images/image_6.jpg)
+
+### Mobile App Screens
+
+![Mobile App — Login, Calibration, Offline Mode, Scheduling, Alerts, Analytics, Notifications, Profile](assets/readme_images/image_3.jpg)
 
 ### Dashboard setup
 
