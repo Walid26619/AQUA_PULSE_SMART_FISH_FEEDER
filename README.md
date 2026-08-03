@@ -79,6 +79,23 @@ guide for details on how this was diagnosed and fixed during development.
 ![Side Cutaway Diagram showing hopper, dispensing mechanism, and electronics bay](assets/readme_images/image_7.jpg)
 
 
+## Prototype Photos
+
+Photos of the first working prototype used during development and testing.
+
+### Front View
+
+![Prototype Front View — LCD status display, manual feed button, and hopper](assets/readme_images/prototype_front_view.jpg)
+
+### Side View
+
+![Prototype Side View — full assembly with hopper, dispensing unit, and wiring](assets/readme_images/prototype_side_view.jpg)
+
+### Top View
+
+![Prototype Top View — hopper with ultrasonic sensor module and feed pellets](assets/readme_images/prototype_top_view.jpg)
+
+
 ## Firmware
 
 Location: `/firmware/AquaPulse_ESP32_Firmware.ino`
