@@ -17,22 +17,34 @@ interface Props {
 export function FarmProfile({ device }: Props) {
   const saved = device.farmProfile;
   const [species, setSpecies] = useState(saved?.species ?? DEFAULT_FARM_PROFILE.species);
-  const [fishCount, setFishCount] = useState(saved?.fishCount ?? DEFAULT_FARM_PROFILE.fishCount);
-  const [feedingsPerDay, setFeedingsPerDay] = useState(saved?.feedingsPerDay ?? DEFAULT_FARM_PROFILE.feedingsPerDay);
-  const [gramsPerPortion, setGramsPerPortion] = useState(saved?.gramsPerPortion ?? DEFAULT_FARM_PROFILE.gramsPerPortion);
+  const [fishCount, setFishCount] = useState(String(saved?.fishCount ?? DEFAULT_FARM_PROFILE.fishCount));
+  const [feedingsPerDay, setFeedingsPerDay] = useState(
+    String(saved?.feedingsPerDay ?? DEFAULT_FARM_PROFILE.feedingsPerDay)
+  );
+  const [gramsPerPortion, setGramsPerPortion] = useState(
+    String(saved?.gramsPerPortion ?? DEFAULT_FARM_PROFILE.gramsPerPortion)
+  );
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState(false);
 
   useEffect(() => {
     if (saved) {
       setSpecies(saved.species ?? DEFAULT_FARM_PROFILE.species);
-      setFishCount(saved.fishCount ?? DEFAULT_FARM_PROFILE.fishCount);
-      setFeedingsPerDay(saved.feedingsPerDay ?? DEFAULT_FARM_PROFILE.feedingsPerDay);
-      setGramsPerPortion(saved.gramsPerPortion ?? DEFAULT_FARM_PROFILE.gramsPerPortion);
+      setFishCount(String(saved.fishCount ?? DEFAULT_FARM_PROFILE.fishCount));
+      setFeedingsPerDay(String(saved.feedingsPerDay ?? DEFAULT_FARM_PROFILE.feedingsPerDay));
+      setGramsPerPortion(String(saved.gramsPerPortion ?? DEFAULT_FARM_PROFILE.gramsPerPortion));
     }
   }, [saved?.species, saved?.fishCount, saved?.feedingsPerDay, saved?.gramsPerPortion]);
 
-  const profile: FarmProfileType = { species, fishCount, feedingsPerDay, gramsPerPortion };
+  const parsedFishCount = fishCount === "" ? 0 : Number(fishCount);
+  const parsedFeedingsPerDay = feedingsPerDay === "" ? 0 : Number(feedingsPerDay);
+  const parsedGramsPerPortion = gramsPerPortion === "" ? 0 : Number(gramsPerPortion);
+  const profile: FarmProfileType = {
+    species,
+    fishCount: Number.isFinite(parsedFishCount) ? parsedFishCount : 0,
+    feedingsPerDay: Number.isFinite(parsedFeedingsPerDay) ? parsedFeedingsPerDay : 0,
+    gramsPerPortion: Number.isFinite(parsedGramsPerPortion) ? parsedGramsPerPortion : 0,
+  };
   const totalDailyGrams = getTotalDailyGrams(profile);
   const portionsPerFeeding = computePortionsPerFeeding(profile);
 
@@ -41,7 +53,12 @@ export function FarmProfile({ device }: Props) {
     try {
       const ref = doc(db, "devices", DEVICE_ID);
       await updateDoc(ref, {
-        farmProfile: { species, fishCount, feedingsPerDay, gramsPerPortion },
+        farmProfile: {
+          species,
+          fishCount: Number.isFinite(parsedFishCount) ? parsedFishCount : 0,
+          feedingsPerDay: Number.isFinite(parsedFeedingsPerDay) ? parsedFeedingsPerDay : 0,
+          gramsPerPortion: Number.isFinite(parsedGramsPerPortion) ? parsedGramsPerPortion : 0,
+        },
       });
       setSavedMessage(true);
       setTimeout(() => setSavedMessage(false), 2500);
@@ -89,7 +106,7 @@ export function FarmProfile({ device }: Props) {
             type="number"
             min={0}
             value={fishCount}
-            onChange={(e) => setFishCount(Math.max(0, Number(e.target.value)))}
+            onChange={(e) => setFishCount(e.target.value)}
             style={{ width: 100 }}
           />
         </div>
@@ -102,7 +119,7 @@ export function FarmProfile({ device }: Props) {
             min={1}
             max={6}
             value={feedingsPerDay}
-            onChange={(e) => setFeedingsPerDay(Math.min(6, Math.max(1, Number(e.target.value))))}
+            onChange={(e) => setFeedingsPerDay(e.target.value)}
             style={{ width: 100 }}
           />
         </div>
@@ -114,7 +131,7 @@ export function FarmProfile({ device }: Props) {
             type="number"
             min={1}
             value={gramsPerPortion}
-            onChange={(e) => setGramsPerPortion(Math.max(1, Number(e.target.value)))}
+            onChange={(e) => setGramsPerPortion(e.target.value)}
             style={{ width: 100 }}
           />
         </div>
